@@ -1,0 +1,40 @@
+# Ignore model weights and checkpoints
+*.pt
+*.pth
+*.h5
+*.ckpt
+*.weights
+*.pb
+*.tflite
+
+# Ignore image files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.svg
+
+# Ignore archives and compressed files
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+*.gz
+*.bz2
+*.json
+*.csv
+*.xls
+*.xlsx
+
+# Ignore temporary and backup files
+*.tmp
+*~
+*.swp
+
+# Ignore Python cache
+__pycache__/
+*.py[cod]
