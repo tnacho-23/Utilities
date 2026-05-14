@@ -18,6 +18,10 @@
 *.svg
 *.txt
 *.log
+*.mp4
+*.avi
+*.mp3
+*.wav
 
 # Ignore archives and compressed files
 *.zip
