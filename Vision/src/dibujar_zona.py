@@ -159,9 +159,416 @@ def procesar_carpeta(carpeta_input, ruta_json, carpeta_output):
             print(f"Aviso: No se encontró la imagen '{nombre_formateado}'")
 
 
+def procesar_carpeta_fup(carpeta_input, ruta_json, nick_cam, carpeta_output):
+    """
+    Processes all images in *carpeta_input* and draws flux-counter zones
+    defined in the FUP-style JSON (flux_counters / zone_in / zone_middle / zone_out).
+
+    Args:
+        carpeta_input  : folder that contains the source images.
+        ruta_json      : path to the FUP JSON config file.
+        nick_cam       : value of 'nick_cam' in the JSON to use.
+        carpeta_output : folder where annotated images will be saved.
+    """
+    if not os.path.exists(carpeta_output):
+        os.makedirs(carpeta_output)
+
+    colores_disponibles = [
+        (255, 0, 0),    # Azul  – zone_in
+        (0, 255, 0),    # Verde – zone_middle
+        (0, 0, 255),    # Rojo  – zone_out
+        (0, 255, 255),  # Amarillo
+        (255, 0, 255),  # Magenta
+        (255, 255, 0),  # Cian
+        (255, 128, 0),  # Naranja
+        (128, 0, 255),  # Violeta
+    ]
+
+    with open(ruta_json, 'r', encoding='utf-8') as f:
+        configuracion = json.load(f)
+
+    # Find the camera entry that matches nick_cam
+    camara = next((c for c in configuracion if c.get('nick_cam') == nick_cam), None)
+    if camara is None:
+        print(f"Error: nick_cam '{nick_cam}' not found in {ruta_json}")
+        return
+
+    # Build a flat list of zones from all flux_counters
+    zone_keys = ['zone_in', 'zone_middle', 'zone_out']
+    zonas = []
+    for fc in camara.get('flux_counters', []):
+        for key in zone_keys:
+            if key in fc:
+                zonas.append(fc[key])
+        # Also include any extra keys that look like zone dicts
+        for k, v in fc.items():
+            if k not in ('name', 'interest_point') + tuple(zone_keys):
+                if isinstance(v, dict) and 'vertices' in v:
+                    zonas.append(v)
+
+    if not zonas:
+        print(f"Aviso: no zones found for nick_cam '{nick_cam}'")
+        return
+
+    # Process every image in the input folder
+    ext_validas = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
+    archivos = [f for f in os.listdir(carpeta_input)
+                if os.path.splitext(f)[1].lower() in ext_validas]
+
+    if not archivos:
+        print(f"Aviso: no images found in {carpeta_input}")
+        return
+
+    for archivo in archivos:
+        ruta_img = os.path.join(carpeta_input, archivo)
+        imagen = cv2.imread(ruta_img)
+        if imagen is None:
+            print(f"Error: could not read {archivo}")
+            continue
+
+        img_resultado = imagen.copy()
+        placed_boxes = []
+
+        # Pass 1: polygons
+        for i, zona in enumerate(zonas):
+            color = colores_disponibles[i % len(colores_disponibles)]
+            img_resultado = dibujar_poligono(img_resultado, zona['vertices'], color, opacidad=0.5)
+
+        # Pass 2: zone names
+        for zona in zonas:
+            dibujar_nombre_zona(img_resultado, zona['vertices'], zona['name'], placed_boxes)
+
+        # Pass 3: vertex coordinates
+        for i, zona in enumerate(zonas):
+            color = colores_disponibles[i % len(colores_disponibles)]
+            dibujar_vertices(img_resultado, zona['vertices'], color, placed_boxes)
+
+        # Pass 4: axis indicator
+        dibujar_ejes(img_resultado)
+
+        ruta_guardado = os.path.join(carpeta_output, f"COLOREADA_{archivo}")
+        cv2.imwrite(ruta_guardado, img_resultado)
+        print(f"OK: {ruta_guardado}")
+
+
+def procesar_imagen_fup(ruta_imagen, ruta_json, nick_cam, carpeta_output):
+    """
+    Draws flux-counter zones on a single image using a FUP-style JSON config.
+
+    Args:
+        ruta_imagen    : path to the source image file.
+        ruta_json      : path to the FUP JSON config file.
+        nick_cam       : value of 'nick_cam' in the JSON to use.
+        carpeta_output : folder where the annotated image will be saved.
+    """
+    if not os.path.exists(carpeta_output):
+        os.makedirs(carpeta_output)
+
+    colores_disponibles = [
+        (255, 0, 0),    # Azul  – zone_in
+        (0, 255, 0),    # Verde – zone_middle
+        (0, 0, 255),    # Rojo  – zone_out
+        (0, 255, 255),  # Amarillo
+        (255, 0, 255),  # Magenta
+        (255, 255, 0),  # Cian
+        (255, 128, 0),  # Naranja
+        (128, 0, 255),  # Violeta
+    ]
+
+    with open(ruta_json, 'r', encoding='utf-8') as f:
+        configuracion = json.load(f)
+
+    camara = next((c for c in configuracion if c.get('nick_cam') == nick_cam), None)
+    if camara is None:
+        print(f"Error: nick_cam '{nick_cam}' not found in {ruta_json}")
+        return
+
+    zone_keys = ['zone_in', 'zone_middle', 'zone_out']
+    zonas = []
+    for fc in camara.get('flux_counters', []):
+        for key in zone_keys:
+            if key in fc:
+                zonas.append(fc[key])
+        for k, v in fc.items():
+            if k not in ('name', 'interest_point') + tuple(zone_keys):
+                if isinstance(v, dict) and 'vertices' in v:
+                    zonas.append(v)
+
+    if not zonas:
+        print(f"Aviso: no zones found for nick_cam '{nick_cam}'")
+        return
+
+    imagen = cv2.imread(ruta_imagen)
+    if imagen is None:
+        print(f"Error: could not read {ruta_imagen}")
+        return
+
+    img_resultado = imagen.copy()
+    placed_boxes = []
+
+    for i, zona in enumerate(zonas):
+        color = colores_disponibles[i % len(colores_disponibles)]
+        img_resultado = dibujar_poligono(img_resultado, zona['vertices'], color, opacidad=0.5)
+
+    for zona in zonas:
+        dibujar_nombre_zona(img_resultado, zona['vertices'], zona['name'], placed_boxes)
+
+    for i, zona in enumerate(zonas):
+        color = colores_disponibles[i % len(colores_disponibles)]
+        dibujar_vertices(img_resultado, zona['vertices'], color, placed_boxes)
+
+    dibujar_ejes(img_resultado)
+
+    nombre_archivo = os.path.basename(ruta_imagen)
+    ruta_guardado = os.path.join(carpeta_output, f"COLOREADA_{nombre_archivo}")
+    cv2.imwrite(ruta_guardado, img_resultado)
+    print(f"OK: {ruta_guardado}")
+
+
+def procesar_imagen(ruta_imagen, ruta_json, carpeta_output, indice_camara=0):
+    """
+    Draws standard zones on a single image using a vertices-style JSON config.
+
+    Args:
+        ruta_imagen    : path to the source image file.
+        ruta_json      : path to the JSON config file (camera_name / zones format).
+        carpeta_output : folder where the annotated image will be saved.
+        indice_camara  : index into the JSON array to use (default 0).
+    """
+    if not os.path.exists(carpeta_output):
+        os.makedirs(carpeta_output)
+
+    colores_disponibles = [
+        (255, 0, 0),
+        (0, 255, 0),
+        (0, 0, 255),
+        (0, 255, 255),
+        (255, 0, 255),
+        (255, 255, 0),
+        (255, 128, 0),
+        (128, 0, 255),
+    ]
+
+    with open(ruta_json, 'r', encoding='utf-8') as f:
+        configuracion = json.load(f)
+
+    camara = configuracion[indice_camara]
+    zonas = camara.get('zones', [])
+
+    if not zonas:
+        print(f"Aviso: no zones found in {ruta_json} (indice_camara={indice_camara})")
+        return
+
+    imagen = cv2.imread(ruta_imagen)
+    if imagen is None:
+        print(f"Error: could not read {ruta_imagen}")
+        return
+
+    img_resultado = imagen.copy()
+    placed_boxes = []
+
+    for i, zona in enumerate(zonas):
+        color = colores_disponibles[i % len(colores_disponibles)]
+        img_resultado = dibujar_poligono(img_resultado, zona['vertices'], color, opacidad=0.5)
+
+    for zona in zonas:
+        dibujar_nombre_zona(img_resultado, zona['vertices'], zona['name'], placed_boxes)
+
+    for i, zona in enumerate(zonas):
+        color = colores_disponibles[i % len(colores_disponibles)]
+        dibujar_vertices(img_resultado, zona['vertices'], color, placed_boxes)
+
+    dibujar_ejes(img_resultado)
+
+    nombre_archivo = os.path.basename(ruta_imagen)
+    ruta_guardado = os.path.join(carpeta_output, f"COLOREADA_{nombre_archivo}")
+    cv2.imwrite(ruta_guardado, img_resultado)
+    print(f"OK: {ruta_guardado}")
+
+
+def procesar_imagen_labelme(ruta_imagen, ruta_json, carpeta_output):
+    """
+    Draws LabelMe polygon shapes on a single image using its sidecar JSON.
+
+    Args:
+        ruta_imagen    : path to the source image file.
+        ruta_json      : path to the LabelMe JSON file (shapes[].label / shapes[].points).
+        carpeta_output : folder where the annotated image will be saved.
+    """
+    if not os.path.exists(carpeta_output):
+        os.makedirs(carpeta_output)
+
+    colores_disponibles = [
+        (255, 0, 0),
+        (0, 255, 0),
+        (0, 0, 255),
+        (0, 255, 255),
+        (255, 0, 255),
+        (255, 255, 0),
+        (255, 128, 0),
+        (128, 0, 255),
+    ]
+
+    with open(ruta_json, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    zonas = [
+        {'name': s['label'], 'vertices': [[int(p[0]), int(p[1])] for p in s['points']]}
+        for s in data.get('shapes', [])
+        if s.get('shape_type') == 'polygon' and s.get('points')
+    ]
+
+    if not zonas:
+        print(f"Aviso: no polygon shapes found in {ruta_json}")
+        return
+
+    imagen = cv2.imread(ruta_imagen)
+    if imagen is None:
+        print(f"Error: could not read {ruta_imagen}")
+        return
+
+    img_resultado = imagen.copy()
+    placed_boxes = []
+
+    for i, zona in enumerate(zonas):
+        color = colores_disponibles[i % len(colores_disponibles)]
+        img_resultado = dibujar_poligono(img_resultado, zona['vertices'], color, opacidad=0.5)
+
+    for zona in zonas:
+        print(f"Dibujando: {zona['name']}")
+        dibujar_nombre_zona(img_resultado, zona['vertices'], zona['name'], placed_boxes)
+
+    for i, zona in enumerate(zonas):
+        color = colores_disponibles[i % len(colores_disponibles)]
+        dibujar_vertices(img_resultado, zona['vertices'], color, placed_boxes)
+
+    dibujar_ejes(img_resultado)
+
+    nombre_archivo = os.path.basename(ruta_imagen)
+    ruta_guardado = os.path.join(carpeta_output, f"COLOREADA_{nombre_archivo}")
+    cv2.imwrite(ruta_guardado, img_resultado)
+    print(f"OK: {ruta_guardado}")
+
+
+def procesar_carpeta_labelme(carpeta_input, carpeta_output):
+    """
+    Processes image+JSON pairs in LabelMe format (shapes[].label / shapes[].points).
+    Each image must have a matching .json sidecar in the same folder.
+
+    Args:
+        carpeta_input  : folder containing the .jpg/.png and .json files.
+        carpeta_output : folder where annotated images will be saved.
+    """
+    if not os.path.exists(carpeta_output):
+        os.makedirs(carpeta_output)
+
+    colores_disponibles = [
+        (255, 0, 0),
+        (0, 255, 0),
+        (0, 0, 255),
+        (0, 255, 255),
+        (255, 0, 255),
+        (255, 255, 0),
+        (255, 128, 0),
+        (128, 0, 255),
+    ]
+
+    ext_validas = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff'}
+    archivos = [f for f in os.listdir(carpeta_input)
+                if os.path.splitext(f)[1].lower() in ext_validas]
+
+    if not archivos:
+        print(f"Aviso: no images found in {carpeta_input}")
+        return
+
+    for archivo in archivos:
+        nombre_base = os.path.splitext(archivo)[0]
+        ruta_json = os.path.join(carpeta_input, nombre_base + '.json')
+
+        if not os.path.exists(ruta_json):
+            print(f"Aviso: no JSON sidecar for {archivo}, skipping")
+            continue
+
+        with open(ruta_json, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        zonas = [
+            {'name': s['label'], 'vertices': [[int(p[0]), int(p[1])] for p in s['points']]}
+            for s in data.get('shapes', [])
+            if s.get('shape_type') == 'polygon' and s.get('points')
+        ]
+
+        if not zonas:
+            print(f"Aviso: no polygon shapes found in {ruta_json}")
+            continue
+
+        ruta_img = os.path.join(carpeta_input, archivo)
+        imagen = cv2.imread(ruta_img)
+        if imagen is None:
+            print(f"Error: could not read {archivo}")
+            continue
+
+        img_resultado = imagen.copy()
+        placed_boxes = []
+
+        for i, zona in enumerate(zonas):
+            color = colores_disponibles[i % len(colores_disponibles)]
+            img_resultado = dibujar_poligono(img_resultado, zona['vertices'], color, opacidad=0.5)
+
+        for zona in zonas:
+            print(f"Dibujando en {archivo}: {zona['name']}")
+            dibujar_nombre_zona(img_resultado, zona['vertices'], zona['name'], placed_boxes)
+
+        for i, zona in enumerate(zonas):
+            color = colores_disponibles[i % len(colores_disponibles)]
+            dibujar_vertices(img_resultado, zona['vertices'], color, placed_boxes)
+
+        dibujar_ejes(img_resultado)
+
+        ruta_guardado = os.path.join(carpeta_output, f"COLOREADA_{archivo}")
+        cv2.imwrite(ruta_guardado, img_resultado)
+        print(f"OK: {ruta_guardado}")
+
+
 # --- Configuración de rutas ---
-ruta_imagenes = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/FUP_Mall/FUP1"
-ruta_json = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/jsons/FUP/FUP1/FUP1_vertices_v2.json"
-ruta_destino = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/FUP_Mall/FUP1/zonas_v2"
+ruta_imagenes = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/DCP/cam_capture"
+ruta_json = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/jsons/DCP/vertices.json"
+ruta_destino = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/DCP/zonas"
 
 procesar_carpeta(ruta_imagenes, ruta_json, ruta_destino)
+
+# --- DCP – bodega_j (door vertices) ---
+procesar_imagen(
+    ruta_imagen    = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/DCP/cam_capture/192_168_4_123_2.jpg",
+    ruta_json      = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/jsons/DCP/door_vertices.json",
+    carpeta_output = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/DCP/zonas",
+)
+
+# --- FUP Mall – easton3 (single reference image) ---
+procesar_imagen_fup(
+    ruta_imagen    = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/FUP_Mall/easton3.jpg",
+    ruta_json      = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/jsons/FUP/easton3.json",
+    nick_cam       = "easton3",
+    carpeta_output = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/FUP_Mall/zonas",
+)
+
+# --- FUP Mall – easton4 (single reference image) ---
+procesar_imagen_fup(
+    ruta_imagen    = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/FUP_Mall/easton4.jpg",
+    ruta_json      = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/jsons/FUP/easton4.json",
+    nick_cam       = "easton4",
+    carpeta_output = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/FUP_Mall/zonas",
+)
+
+# --- Dipreca – captures (LabelMe format) ---
+procesar_carpeta_labelme(
+    carpeta_input  = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/Dipreca/captures",
+    carpeta_output = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/Dipreca/zonas",
+)
+
+# --- FUP Mall – easton3 (LabelMe sidecar JSON) ---
+procesar_imagen_labelme(
+    ruta_imagen    = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/FUP_Mall/easton3.jpg",
+    ruta_json      = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/FUP_Mall/easton3.json",
+    carpeta_output = "C:/Users/ignac/Escritorio/DualVision/Utilities/Vision/workbench/images/FUP_Mall/zonas",
+)
